@@ -9,14 +9,6 @@ import {
   CardHeader,
   CardTitle
 } from '@/components/ui/card';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 
 // Define interfaces
 interface Restaurant {
@@ -34,21 +26,8 @@ interface Location {
   lng: number;
 }
 
-const cuisineTypes = [
-  "All",
-  "Japanese",
-  "Korean",
-  "Thai",
-  "Chinese",
-  "Italian",
-  "American",
-  "Mexican",
-  "Indian"
-];
-
 const RestaurantPicker = () => {
   const [userLocation, setUserLocation] = useState<Location | null>(null);
-  const [selectedCuisine, setSelectedCuisine] = useState<string>("All");
   const [searchRadius, setSearchRadius] = useState<number>(2);
   const [suggestion, setSuggestion] = useState<Restaurant | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
@@ -89,12 +68,15 @@ const RestaurantPicker = () => {
         },
         body: JSON.stringify({
           location: userLocation,
-          radius: searchRadius,
-          cuisine: selectedCuisine
+          radius: searchRadius
         }),
       });
 
       if (!response.ok) {
+        if (response.status === 429) {
+          const data = await response.json();
+          throw new Error(`Rate limit exceeded. Please try again in ${data.retryAfter} seconds.`);
+        }
         throw new Error('Failed to fetch restaurants');
       }
 
@@ -120,8 +102,8 @@ const RestaurantPicker = () => {
     <div className="max-w-md mx-auto p-4">
       <Card>
         <CardHeader>
-          <CardTitle>Restaurant Picker</CardTitle>
-          <CardDescription>Let us help you decide what to eat</CardDescription>
+          <CardTitle>Smart Restaurant Picker</CardTitle>
+          <CardDescription>Don&apos;t know what to eat? We do!</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
@@ -135,30 +117,13 @@ const RestaurantPicker = () => {
               )}
             </div>
 
-            {/* Error Alert */}
+            {/* Error Message */}
             {error && (
-              <Alert variant="destructive">
+              <div className="flex items-center gap-2 p-3 text-sm text-red-600 bg-red-50 rounded-lg">
                 <AlertCircle className="h-4 w-4" />
-                <AlertDescription>{error}</AlertDescription>
-              </Alert>
+                <p>{error}</p>
+              </div>
             )}
-
-            {/* Cuisine Selection */}
-            <div>
-              <label className="block text-sm font-medium mb-2">Cuisine Type</label>
-              <Select value={selectedCuisine} onValueChange={setSelectedCuisine}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select cuisine" />
-                </SelectTrigger>
-                <SelectContent>
-                  {cuisineTypes.map(cuisine => (
-                    <SelectItem key={cuisine} value={cuisine}>
-                      {cuisine}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
 
             {/* Radius Selection */}
             <div>

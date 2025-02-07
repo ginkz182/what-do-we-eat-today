@@ -36,13 +36,12 @@ interface RequestBody {
     lng: number;
   };
   radius: number;
-  cuisine: string;
 }
 
 export async function POST(request: NextRequest) {
   try {
     const body: RequestBody = await request.json();
-    const { location, radius, cuisine } = body;
+    const { location, radius } = body;
 
     const searchParams: PlaceSearchParams = {
       locationRestriction: {
@@ -58,11 +57,6 @@ export async function POST(request: NextRequest) {
       maxResultCount: 20,
       languageCode: "en"
     };
-
-    // Add cuisine type if specified
-    if (cuisine && cuisine !== 'All') {
-      searchParams.includedTypes.push(cuisine.toLowerCase());
-    }
 
     if (!GOOGLE_PLACES_API_KEY) {
       throw new Error('Google Places API key is not configured');
