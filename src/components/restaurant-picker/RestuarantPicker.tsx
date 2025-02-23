@@ -2,15 +2,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { Search, MapPin, RefreshCcw, AlertCircle } from 'lucide-react';
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle
-} from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
-// Define interfaces
 interface Restaurant {
   id: string;
   name: string;
@@ -26,31 +19,41 @@ interface Location {
   lng: number;
 }
 
+interface APIResponse {
+  data: Restaurant[];
+  source: 'api' | 'user_cache' | 'location_cache';
+}
+
 const RestaurantPicker = () => {
   const [userLocation, setUserLocation] = useState<Location | null>(null);
   const [searchRadius, setSearchRadius] = useState<number>(2);
   const [suggestion, setSuggestion] = useState<Restaurant | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [dataSource, setDataSource] = useState<string>('');
 
-  useEffect(() => {
-    // Get user's location when component mounts
-    if ("geolocation" in navigator) {
+  const getCurrentLocation = () => {
+    if ('geolocation' in navigator) {
       navigator.geolocation.getCurrentPosition(
-        (position) => {
+        position => {
           setUserLocation({
             lat: position.coords.latitude,
-            lng: position.coords.longitude
+            lng: position.coords.longitude,
           });
+          setError(null);
         },
-        (error) => {
-          console.error("Error getting location:", error);
-          setError("Unable to get your location. Please enable location services.");
-        }
+        error => {
+          console.error('Error getting location:', error);
+          setError('Unable to get your location. Please enable location services.');
+        },
       );
     } else {
-      setError("Geolocation is not supported by your browser.");
+      setError('Geolocation is not supported by your browser.');
     }
+  };
+
+  useEffect(() => {
+    getCurrentLocation();
   }, []);
 
   const getRandomRestaurant = async () => {
@@ -59,39 +62,47 @@ const RestaurantPicker = () => {
     setLoading(true);
     setError(null);
     setSuggestion(null);
+    setDataSource('');
 
     try {
-      const response = await fetch('/api/restaurants', {
+      const response = await fetch('/api/places', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
           location: userLocation,
-          radius: searchRadius
+          radius: searchRadius,
         }),
       });
 
       if (!response.ok) {
+        const data = await response.json();
         if (response.status === 429) {
-          const data = await response.json();
-          throw new Error(`Rate limit exceeded. Please try again in ${data.retryAfter} seconds.`);
+          throw new Error(
+            `Rate limit exceeded. Please try again after ${new Date(data.reset).toLocaleTimeString()}.`,
+          );
         }
-        throw new Error('Failed to fetch restaurants');
+        throw new Error(data.error || 'Failed to fetch restaurants');
       }
 
-      const { data } = await response.json();
+      const { data, source } = (await response.json()) as APIResponse;
 
       if (data.length === 0) {
-        setError('No restaurants found with the selected criteria. Try increasing the radius or changing the cuisine type.');
+        setError(
+          'No restaurants found with the selected criteria. Try increasing the radius or changing the cuisine type.',
+        );
         return;
       }
 
       // Get random restaurant from results
       const randomIndex = Math.floor(Math.random() * data.length);
       setSuggestion(data[randomIndex]);
+      setDataSource(source);
     } catch (error) {
-      setError('Error fetching restaurants. Please try again.');
+      setError(
+        error instanceof Error ? error.message : 'Error fetching restaurants. Please try again.',
+      );
       console.error('Error:', error);
     } finally {
       setLoading(false);
@@ -108,12 +119,23 @@ const RestaurantPicker = () => {
         <CardContent>
           <div className="space-y-4">
             {/* Location Status */}
-            <div className="flex items-center gap-2 text-sm">
-              <MapPin className="w-4 h-4" />
-              {userLocation ? (
-                <span className="text-green-600">Location detected</span>
-              ) : (
-                <span className="text-yellow-600">Detecting location...</span>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-sm">
+                <MapPin className="w-4 h-4" />
+                {userLocation ? (
+                  <span className="text-green-600">Location detected</span>
+                ) : (
+                  <span className="text-yellow-600">Detecting location...</span>
+                )}
+              </div>
+              {userLocation && (
+                <button
+                  onClick={getCurrentLocation}
+                  className="text-blue-600 hover:text-blue-800"
+                  title="Refresh location"
+                >
+                  <RefreshCcw className="w-4 h-4" />
+                </button>
               )}
             </div>
 
@@ -136,7 +158,7 @@ const RestaurantPicker = () => {
                 max="5"
                 step="0.5"
                 value={searchRadius}
-                onChange={(e) => setSearchRadius(parseFloat(e.target.value))}
+                onChange={e => setSearchRadius(parseFloat(e.target.value))}
                 className="w-full"
               />
             </div>
@@ -166,12 +188,24 @@ const RestaurantPicker = () => {
                 </p>
                 <p className="text-sm text-gray-600 mt-1">{suggestion.address}</p>
                 <div className="mt-2">
-                  <span className="text-yellow-500">{'★'.repeat(Math.floor(suggestion.rating))}</span>
-                  <span className="text-gray-300">{'★'.repeat(5 - Math.floor(suggestion.rating))}</span>
+                  <span className="text-yellow-500">
+                    {'★'.repeat(Math.floor(suggestion.rating))}
+                  </span>
+                  <span className="text-gray-300">
+                    {'★'.repeat(5 - Math.floor(suggestion.rating))}
+                  </span>
                   <span className="ml-1 text-sm text-gray-600">
                     {suggestion.rating.toFixed(1)} ({suggestion.reviewCount} reviews)
                   </span>
                 </div>
+                <p className="text-xs text-gray-500 mt-2">
+                  Source:{' '}
+                  {dataSource === 'api'
+                    ? 'Live Search'
+                    : dataSource === 'user_cache'
+                      ? 'Recent Search'
+                      : 'Nearby Search'}
+                </p>
               </div>
             )}
           </div>
