@@ -6,9 +6,10 @@ import { RateLimiter } from '@/utils/rateLimit';
 import { GooglePlacesService } from '@/utils/places';
 import { isNearbyLocation } from '@/utils/location';
 import type { PlaceSearchParams, RequestBody, UserSearch } from '@/types/places';
+import { CACHE, GOOGLE_PLACES } from '@/config/constants';
 
 const GOOGLE_PLACES_API_KEY = process.env.GOOGLE_PLACES_API_KEY!;
-const CACHE_TTL = 3600; // 1 hour
+const CACHE_TTL = CACHE.TTL;
 
 // Initialize services
 const redis = new Redis({
@@ -17,36 +18,14 @@ const redis = new Redis({
 });
 
 const cacheManager = new CacheManager(redis, CACHE_TTL);
-const rateLimiter = new RateLimiter(redis, 100); // 100 requests per day
+const rateLimiter = new RateLimiter(redis);
 const placesService = new GooglePlacesService(GOOGLE_PLACES_API_KEY);
 
 export async function POST(request: NextRequest) {
   try {
-    // Get IP for rate limiting
-    const forwardedFor = (await headers()).get('x-forwarded-for');
+    const headersList = await headers();
+    const forwardedFor = headersList.get('x-forwarded-for');
     const ip = forwardedFor?.split(',')[0] ?? '127.0.0.1';
-
-    // Check rate limit
-    const { success, limit, reset, remaining } = await rateLimiter.checkLimit(ip);
-
-    if (!success) {
-      return NextResponse.json(
-        {
-          error: 'Rate limit exceeded',
-          limit,
-          remaining,
-          reset,
-        },
-        {
-          status: 429,
-          headers: {
-            'X-RateLimit-Limit': limit.toString(),
-            'X-RateLimit-Remaining': remaining.toString(),
-            'X-RateLimit-Reset': reset.toString(),
-          },
-        },
-      );
-    }
 
     const body: RequestBody = await request.json();
     const { location, radius } = body;
@@ -58,15 +37,15 @@ export async function POST(request: NextRequest) {
             latitude: location.lat,
             longitude: location.lng,
           },
-          radius: radius * 1000, // Convert km to meters
+          radius: radius * 1000,
         },
       },
       includedTypes: ['restaurant'],
-      maxResultCount: 20,
-      languageCode: 'en',
+      maxResultCount: GOOGLE_PLACES.MAX_RESULTS,
+      languageCode: GOOGLE_PLACES.LANGUAGE,
     };
 
-    // Check user's recent searches
+    // Check caches first without rate limiting
     const userSearches = await cacheManager.getUserSearches(ip);
     const matchingSearch = userSearches.find(
       (search: UserSearch) =>
@@ -75,6 +54,7 @@ export async function POST(request: NextRequest) {
           searchParams.locationRestriction.circle.radius,
     );
 
+    // Return if found in user's recent searches
     if (matchingSearch && Date.now() - matchingSearch.timestamp < CACHE_TTL * 1000) {
       return NextResponse.json({
         data: matchingSearch.results,
@@ -92,7 +72,30 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Fetch from Google Places API
+    // Only check rate limit before making Google API call
+    const rateLimitResult = await rateLimiter.checkLimit(ip);
+    if (!rateLimitResult.success) {
+      return NextResponse.json(
+        {
+          error: 'API rate limit exceeded',
+          limit: rateLimitResult.limit,
+          remaining: rateLimitResult.remaining,
+          reset: new Date(rateLimitResult.reset).toISOString(),
+          retryAfter: Math.ceil((rateLimitResult.reset - Date.now()) / 1000),
+        },
+        {
+          status: 429,
+          headers: {
+            'X-RateLimit-Limit': rateLimitResult.limit.toString(),
+            'X-RateLimit-Remaining': rateLimitResult.remaining.toString(),
+            'X-RateLimit-Reset': rateLimitResult.reset.toString(),
+            'Retry-After': Math.ceil((rateLimitResult.reset - Date.now()) / 1000).toString(),
+          },
+        },
+      );
+    }
+
+    // Make Google API call only if no cache hits and within rate limit
     const response = await fetch('https://places.googleapis.com/v1/places:searchNearby', {
       method: 'POST',
       headers: {
@@ -120,7 +123,7 @@ export async function POST(request: NextRequest) {
       reviewCount: place.userRatingCount || 0,
     }));
 
-    // Cache results
+    // Cache the new results
     await Promise.all([
       cacheManager.setLocationCache(searchParams, restaurants),
       cacheManager.addUserSearch(ip, searchParams, restaurants),
