@@ -96,32 +96,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Make Google API call only if no cache hits and within rate limit
-    const response = await fetch('https://places.googleapis.com/v1/places:searchNearby', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Goog-Api-Key': GOOGLE_PLACES_API_KEY,
-        'X-Goog-FieldMask':
-          'places.id,places.displayName,places.priceLevel,places.rating,places.userRatingCount,places.types,places.formattedAddress',
-      },
-      body: JSON.stringify(searchParams),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Google Places API error: ${response.statusText}`);
-    }
-
-    const data = await response.json();
-
-    const restaurants = data.places.map((place: any) => ({
-      id: place.id,
-      name: place.displayName.text,
-      cuisine: place.types[0],
-      price: ''.padStart(place.priceLevel || 0, '$'),
-      rating: place.rating || 0,
-      address: place.formattedAddress,
-      reviewCount: place.userRatingCount || 0,
-    }));
+    const restaurants = await placesService.searchPlaces(searchParams);
 
     // Cache the new results
     await Promise.all([
