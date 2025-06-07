@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { headers } from 'next/headers';
-import { Redis } from '@upstash/redis';
+import { Redis } from 'ioredis';
 import { CacheManager } from '@/utils/cache';
 import { RateLimiter } from '@/utils/rateLimit';
 import { GooglePlacesService } from '@/utils/places';
@@ -12,10 +12,7 @@ const GOOGLE_PLACES_API_KEY = process.env.GOOGLE_PLACES_API_KEY!;
 const CACHE_TTL = CACHE.TTL;
 
 // Initialize services
-const redis = new Redis({
-  url: process.env.UPSTASH_REDIS_REST_URL!,
-  token: process.env.UPSTASH_REDIS_REST_TOKEN!,
-});
+const redis = new Redis(process.env.REDIS_URL!);
 
 const cacheManager = new CacheManager(redis, CACHE_TTL);
 const rateLimiter = new RateLimiter(redis);

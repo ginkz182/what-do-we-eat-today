@@ -1,21 +1,44 @@
-// utils/ratelimit.ts
-import { Ratelimit } from '@upstash/ratelimit';
-import { Redis } from '@upstash/redis';
-import { RATE_LIMIT } from '@/config/constants';
+import { Redis } from 'ioredis';
 
 export class RateLimiter {
-  private limiter: Ratelimit;
+  constructor(
+    private redis: Redis,
+    private limit: number = 10,
+    private windowSeconds: number = 60,
+  ) {}
 
-  constructor(redis: Redis) {
-    this.limiter = new Ratelimit({
-      redis,
-      limiter: Ratelimit.slidingWindow(RATE_LIMIT.REQUESTS_PER_DAY, RATE_LIMIT.WINDOW),
-      analytics: true,
-      prefix: 'google_api_ratelimit',
-    });
-  }
+  async checkLimit(ip: string) {
+    const key = `rate_limit:${ip}`;
+    const now = Math.floor(Date.now() / 1000);
+    const window = now - this.windowSeconds;
 
-  async checkLimit(identifier: string) {
-    return await this.limiter.limit(identifier);
+    // Use a pipeline for atomic operations
+    const pipeline = this.redis.pipeline();
+    pipeline.zremrangebyscore(key, 0, window);
+    pipeline.zcard(key);
+    pipeline.zadd(key, now, `${now}-${Math.random()}`);
+    pipeline.expire(key, this.windowSeconds);
+
+    const results = await pipeline.exec();
+    const currentCount = (results?.[1]?.[1] as number) || 0;
+
+    if (currentCount >= this.limit) {
+      // Remove the request we just added since we're over limit
+      await this.redis.zrem(key, `${now}-${Math.random()}`);
+
+      return {
+        success: false,
+        limit: this.limit,
+        remaining: 0,
+        reset: (now + this.windowSeconds) * 1000,
+      };
+    }
+
+    return {
+      success: true,
+      limit: this.limit,
+      remaining: this.limit - currentCount - 1,
+      reset: (now + this.windowSeconds) * 1000,
+    };
   }
 }

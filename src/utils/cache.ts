@@ -1,5 +1,5 @@
 // utils/cache.ts
-import { Redis } from '@upstash/redis';
+import { Redis } from 'ioredis';
 import { PlaceSearchParams, Restaurant, UserSearch } from '../types/places';
 import { generateGeohash } from './geohash';
 import { roundCoordinates, roundRadius } from './location';
@@ -30,18 +30,19 @@ export class CacheManager {
 
   async getLocationCache(params: PlaceSearchParams): Promise<Restaurant[] | null> {
     const key = this.generateLocationCacheKey(params);
-    const data = await this.redis.get<string>(key);
-    return data ? (typeof data === 'string' ? JSON.parse(data) : data) : null;
+    const data = await this.redis.get(key);
+    return data ? JSON.parse(data) : null;
   }
 
   async setLocationCache(params: PlaceSearchParams, data: Restaurant[]): Promise<void> {
     const key = this.generateLocationCacheKey(params);
-    await this.redis.set(key, JSON.stringify(data), { ex: this.defaultTTL });
+    await this.redis.setex(key, this.defaultTTL, JSON.stringify(data));
   }
 
   async getUserSearches(userId: string): Promise<UserSearch[]> {
     const key = this.getUserCacheKey(userId);
-    return (await this.redis.get<UserSearch[]>(key)) || [];
+    const data = await this.redis.get(key);
+    return data ? JSON.parse(data) : [];
   }
 
   async addUserSearch(
@@ -61,6 +62,6 @@ export class CacheManager {
     searches.unshift(newSearch);
     searches.splice(5); // Keep only last 5 searches
 
-    await this.redis.set(key, searches, { ex: 86400 }); // 24 hours TTL
+    await this.redis.setex(key, 86400, JSON.stringify(searches)); // 24 hours TTL
   }
 }
