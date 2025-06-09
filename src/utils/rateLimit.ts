@@ -3,42 +3,65 @@ import { Redis } from 'ioredis';
 export class RateLimiter {
   constructor(
     private redis: Redis,
-    private limit: number = 10,
-    private windowSeconds: number = 60,
+    private systemLimit: number = 100,
+    private ipLimit: number = 10,
+    private systemWindow: number = 3600, // 1 hour
+    private ipWindow: number = 300, // 5 minutes
   ) {}
 
   async checkLimit(ip: string) {
-    const key = `rate_limit:${ip}`;
-    const now = Math.floor(Date.now() / 1000);
-    const window = now - this.windowSeconds;
+    // Check IP limit FIRST (no side effects)
+    const ipResult = await this.checkIpLimit(ip);
+    if (!ipResult.success) {
+      return { reason: 'ip_limit', ...ipResult };
+    }
 
-    // Use a pipeline for atomic operations
+    // Only check system limit if IP check passes
+    const systemResult = await this.checkSystemLimit();
+    if (!systemResult.success) {
+      return { reason: 'system_limit', ...systemResult };
+    }
+
+    return { ...systemResult, ...ipResult };
+  }
+
+  private async checkSystemLimit() {
+    const key = `system_rate_limit:places`;
+    return this.executeRateLimit(key, this.systemLimit, this.systemWindow);
+  }
+
+  private async checkIpLimit(ip: string) {
+    const key = `ip_rate_limit:places:${ip}`;
+    return this.executeRateLimit(key, this.ipLimit, this.ipWindow);
+  }
+
+  private async executeRateLimit(key: string, limit: number, windowSeconds: number) {
+    const now = Math.floor(Date.now() / 1000);
+    const window = now - windowSeconds;
+
     const pipeline = this.redis.pipeline();
     pipeline.zremrangebyscore(key, 0, window);
     pipeline.zcard(key);
     pipeline.zadd(key, now, `${now}-${Math.random()}`);
-    pipeline.expire(key, this.windowSeconds);
+    pipeline.expire(key, windowSeconds);
 
     const results = await pipeline.exec();
     const currentCount = (results?.[1]?.[1] as number) || 0;
 
-    if (currentCount >= this.limit) {
-      // Remove the request we just added since we're over limit
-      await this.redis.zrem(key, `${now}-${Math.random()}`);
-
+    if (currentCount >= limit) {
       return {
         success: false,
-        limit: this.limit,
+        limit,
         remaining: 0,
-        reset: (now + this.windowSeconds) * 1000,
+        reset: (now + windowSeconds) * 1000,
       };
     }
 
     return {
       success: true,
-      limit: this.limit,
-      remaining: this.limit - currentCount - 1,
-      reset: (now + this.windowSeconds) * 1000,
+      limit,
+      remaining: limit - currentCount - 1,
+      reset: (now + windowSeconds) * 1000,
     };
   }
 }
