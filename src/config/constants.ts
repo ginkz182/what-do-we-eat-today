@@ -9,6 +9,10 @@ export const CACHE = {
 } as const;
 
 export const GOOGLE_PLACES = {
-  MAX_RESULTS: 20,
+  MAX_RESULTS: 20, // Google Places API max limit
   LANGUAGE: 'en',
+} as const;
+
+export const CUISINE_SELECTION = {
+  MAX_SELECTIONS: 3, // Maximum number of cuisines that can be selected
 } as const;

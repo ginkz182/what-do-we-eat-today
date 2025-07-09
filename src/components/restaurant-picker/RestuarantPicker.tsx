@@ -1,9 +1,18 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Search, MapPin, RefreshCcw, AlertCircle, ExternalLink, ChevronDown, ChevronUp } from 'lucide-react';
+import {
+  Search,
+  MapPin,
+  RefreshCcw,
+  AlertCircle,
+  ExternalLink,
+  ChevronDown,
+  ChevronUp,
+} from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import Image from 'next/image';
+import { CUISINE_SELECTION } from '@/config/constants';
 
 interface Restaurant {
   id: string;
@@ -23,7 +32,7 @@ interface Location {
 
 interface APIResponse {
   data: Restaurant[];
-  source: 'api' | 'user_cache' | 'location_cache';
+  source: 'api' | 'per_cuisine_api' | 'per_cuisine_cache' | 'location_cache' | 'mixed';
 }
 
 const RestaurantPicker = () => {
@@ -66,13 +75,21 @@ const RestaurantPicker = () => {
   const [dataSource, setDataSource] = useState<string>('');
 
   const isAllSelected = selectedCuisines.length === allCuisineValues.length;
+  const maxSelectionsReached = selectedCuisines.length >= CUISINE_SELECTION.MAX_SELECTIONS;
 
   const handleCuisineChange = (cuisineValue: string) => {
-    setSelectedCuisines(prev => 
-      prev.includes(cuisineValue)
-        ? prev.filter(c => c !== cuisineValue)
-        : [...prev, cuisineValue]
-    );
+    setSelectedCuisines(prev => {
+      if (prev.includes(cuisineValue)) {
+        // Always allow deselection
+        return prev.filter(c => c !== cuisineValue);
+      } else {
+        // Only allow selection if under the limit
+        if (prev.length < CUISINE_SELECTION.MAX_SELECTIONS) {
+          return [...prev, cuisineValue];
+        }
+        return prev; // Don't add if at limit
+      }
+    });
   };
 
   const handleAllChange = () => {
@@ -124,7 +141,7 @@ const RestaurantPicker = () => {
         body: JSON.stringify({
           location: userLocation,
           radius: searchRadius,
-          cuisines: selectedCuisines,
+          cuisines: isAllSelected ? [] : selectedCuisines, // Send empty array when "All Types" selected
         }),
       });
 
@@ -223,16 +240,24 @@ const RestaurantPicker = () => {
                 className="flex items-center justify-between w-full text-sm font-medium mb-3 p-2 bg-gray-50 rounded hover:bg-gray-100 transition-colors"
               >
                 <div className="flex-1 text-left">
-                  <div>Cuisine Types ({selectedCuisines.length} selected)</div>
-                  {!isCuisineExpanded && selectedCuisines.length > 0 && selectedCuisines.length < allCuisineValues.length && (
-                    <div className="text-xs text-gray-600 mt-1 truncate">
-                      {selectedCuisines
-                        .slice(0, 3)
-                        .map(cuisine => cuisineOptions.find(opt => opt.value === cuisine)?.label)
-                        .join(', ')}
-                      {selectedCuisines.length > 3 && ` +${selectedCuisines.length - 3} more`}
-                    </div>
-                  )}
+                  <div>
+                    Cuisine Types ({selectedCuisines.length}/
+                    {isAllSelected ? 'All' : CUISINE_SELECTION.MAX_SELECTIONS} selected)
+                    {!isAllSelected && maxSelectionsReached && (
+                      <span className="text-xs text-amber-600 ml-1">(Max reached)</span>
+                    )}
+                  </div>
+                  {!isCuisineExpanded &&
+                    selectedCuisines.length > 0 &&
+                    selectedCuisines.length < allCuisineValues.length && (
+                      <div className="text-xs text-gray-600 mt-1 truncate">
+                        {selectedCuisines
+                          .slice(0, 3)
+                          .map(cuisine => cuisineOptions.find(opt => opt.value === cuisine)?.label)
+                          .join(', ')}
+                        {selectedCuisines.length > 3 && ` +${selectedCuisines.length - 3} more`}
+                      </div>
+                    )}
                   {!isCuisineExpanded && isAllSelected && (
                     <div className="text-xs text-gray-600 mt-1">All types selected</div>
                   )}
@@ -243,7 +268,7 @@ const RestaurantPicker = () => {
                   <ChevronDown className="w-4 h-4 flex-shrink-0" />
                 )}
               </button>
-              
+
               {isCuisineExpanded && (
                 <div className="max-h-48 overflow-y-auto">
                   {/* All checkbox */}
@@ -254,23 +279,42 @@ const RestaurantPicker = () => {
                       onChange={handleAllChange}
                       className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                     />
-                    <span>All Types</span>
+                    <span>Any</span>
                   </label>
-                  
+
                   {/* Individual cuisine checkboxes */}
                   <div className="grid grid-cols-2 gap-2">
-                    {cuisineOptions.map((cuisine) => (
-                      <label key={cuisine.value} className="flex items-center space-x-2 text-sm">
-                        <input
-                          type="checkbox"
-                          checked={selectedCuisines.includes(cuisine.value)}
-                          onChange={() => handleCuisineChange(cuisine.value)}
-                          className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                        />
-                        <span>{cuisine.label}</span>
-                      </label>
-                    ))}
+                    {cuisineOptions.map(cuisine => {
+                      const isSelected = selectedCuisines.includes(cuisine.value);
+                      const isDisabled = !isAllSelected && !isSelected && maxSelectionsReached;
+
+                      return (
+                        <label
+                          key={cuisine.value}
+                          className={`flex items-center space-x-2 text-sm ${
+                            isDisabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => handleCuisineChange(cuisine.value)}
+                            disabled={isDisabled}
+                            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
+                          />
+                          <span>{cuisine.label}</span>
+                        </label>
+                      );
+                    })}
                   </div>
+
+                  {/* Selection limit hint */}
+                  {!isAllSelected && (
+                    <div className="mt-2 text-xs text-gray-600 bg-blue-50 p-2 rounded">
+                      💡 Tip: Select up to {CUISINE_SELECTION.MAX_SELECTIONS} specific cuisines for
+                      targeted results, or choose &quot;Any&quot; for a broader search.
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -342,14 +386,16 @@ const RestaurantPicker = () => {
                 <p className="text-xs text-gray-500 mt-2">
                   Source:{' '}
                   {dataSource === 'api'
-                    ? 'Live Search'
-                    : dataSource === 'user_cache'
-                      ? 'Recent Search'
-                      : dataSource === 'location_cache'
-                        ? 'Cached Search'
-                        : dataSource === 'mixed'
-                          ? 'Mixed Cache + Live'
-                          : 'Nearby Search'}
+                    ? 'Live Search (Broad)'
+                    : dataSource === 'per_cuisine_api'
+                      ? 'Live Search (Targeted)'
+                      : dataSource === 'per_cuisine_cache'
+                        ? 'Cached Search (Targeted)'
+                        : dataSource === 'location_cache'
+                          ? 'Cached Search (Broad)'
+                          : dataSource === 'mixed'
+                            ? 'Mixed Cache + Live'
+                            : 'Nearby Search'}
                 </p>
               </div>
             )}
