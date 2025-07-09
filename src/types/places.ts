@@ -32,11 +32,21 @@ export interface GooglePlace {
   userRatingCount: number;
   types: string[];
   formattedAddress: string;
+  photos?: {
+    name: string;
+    widthPx: number;
+    heightPx: number;
+    authorAttributions?: {
+      displayName: string;
+      uri: string;
+    }[];
+  }[];
 }
 
 export interface RequestBody {
   location: RequestLocation;
   radius: number;
+  cuisines?: string[];
 }
 
 export interface Restaurant {
@@ -47,6 +57,7 @@ export interface Restaurant {
   rating: number;
   address: string;
   reviewCount: number;
+  photos?: string[];
 }
 
 export interface UserSearch {

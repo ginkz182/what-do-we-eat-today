@@ -20,8 +20,9 @@ export class CacheManager {
     );
     const radius = roundRadius(params.locationRestriction.circle.radius);
     const geohash = generateGeohash(latitude, longitude);
+    const cuisines = params.includedTypes.sort().join(',');
 
-    return `places:${geohash}:${radius}`;
+    return `places:${geohash}:${radius}:${cuisines}`;
   }
 
   private getUserCacheKey(userId: string): string {
@@ -29,20 +30,34 @@ export class CacheManager {
   }
 
   async getLocationCache(params: PlaceSearchParams): Promise<Restaurant[] | null> {
-    const key = this.generateLocationCacheKey(params);
-    const data = await this.redis.get(key);
-    return data ? JSON.parse(data) : null;
+    try {
+      const key = this.generateLocationCacheKey(params);
+      const data = await this.redis.get(key);
+      return data ? JSON.parse(data) : null;
+    } catch (error) {
+      console.warn('Cache read failed, continuing without cache:', error);
+      return null;
+    }
   }
 
   async setLocationCache(params: PlaceSearchParams, data: Restaurant[]): Promise<void> {
-    const key = this.generateLocationCacheKey(params);
-    await this.redis.setex(key, this.defaultTTL, JSON.stringify(data));
+    try {
+      const key = this.generateLocationCacheKey(params);
+      await this.redis.setex(key, this.defaultTTL, JSON.stringify(data));
+    } catch (error) {
+      console.warn('Cache write failed, continuing without cache:', error);
+    }
   }
 
   async getUserSearches(userId: string): Promise<UserSearch[]> {
-    const key = this.getUserCacheKey(userId);
-    const data = await this.redis.get(key);
-    return data ? JSON.parse(data) : [];
+    try {
+      const key = this.getUserCacheKey(userId);
+      const data = await this.redis.get(key);
+      return data ? JSON.parse(data) : [];
+    } catch (error) {
+      console.warn('User cache read failed, continuing without cache:', error);
+      return [];
+    }
   }
 
   async addUserSearch(
@@ -50,18 +65,22 @@ export class CacheManager {
     params: PlaceSearchParams,
     results: Restaurant[],
   ): Promise<void> {
-    const key = this.getUserCacheKey(userId);
-    const searches = await this.getUserSearches(userId);
+    try {
+      const key = this.getUserCacheKey(userId);
+      const searches = await this.getUserSearches(userId);
 
-    const newSearch: UserSearch = {
-      params,
-      results,
-      timestamp: Date.now(),
-    };
+      const newSearch: UserSearch = {
+        params,
+        results,
+        timestamp: Date.now(),
+      };
 
-    searches.unshift(newSearch);
-    searches.splice(5); // Keep only last 5 searches
+      searches.unshift(newSearch);
+      searches.splice(5); // Keep only last 5 searches
 
-    await this.redis.setex(key, 86400, JSON.stringify(searches)); // 24 hours TTL
+      await this.redis.setex(key, 86400, JSON.stringify(searches)); // 24 hours TTL
+    } catch (error) {
+      console.warn('User cache write failed, continuing without cache:', error);
+    }
   }
 }

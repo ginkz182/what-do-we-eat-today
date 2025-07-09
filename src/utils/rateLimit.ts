@@ -10,19 +10,29 @@ export class RateLimiter {
   ) {}
 
   async checkLimit(ip: string) {
-    // Check IP limit FIRST (no side effects)
-    const ipResult = await this.checkIpLimit(ip);
-    if (!ipResult.success) {
-      return { reason: 'ip_limit', ...ipResult };
-    }
+    try {
+      // Check IP limit FIRST (no side effects)
+      const ipResult = await this.checkIpLimit(ip);
+      if (!ipResult.success) {
+        return { reason: 'ip_limit', ...ipResult };
+      }
 
-    // Only check system limit if IP check passes
-    const systemResult = await this.checkSystemLimit();
-    if (!systemResult.success) {
-      return { reason: 'system_limit', ...systemResult };
-    }
+      // Only check system limit if IP check passes
+      const systemResult = await this.checkSystemLimit();
+      if (!systemResult.success) {
+        return { reason: 'system_limit', ...systemResult };
+      }
 
-    return { ...systemResult, ...ipResult };
+      return { ...systemResult, ...ipResult };
+    } catch (error) {
+      console.warn('Rate limit check failed, allowing request:', error);
+      return {
+        success: true,
+        limit: this.ipLimit,
+        remaining: this.ipLimit,
+        reset: Date.now() + this.ipWindow * 1000,
+      };
+    }
   }
 
   private async checkSystemLimit() {

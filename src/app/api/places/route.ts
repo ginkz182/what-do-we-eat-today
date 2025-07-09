@@ -5,13 +5,14 @@ import { CacheManager } from '@/utils/cache';
 import { RateLimiter } from '@/utils/rateLimit';
 import { GooglePlacesService } from '@/utils/places';
 import { isNearbyLocation } from '@/utils/location';
-import type { PlaceSearchParams, RequestBody, UserSearch } from '@/types/places';
+import type { PlaceSearchParams, RequestBody, UserSearch, Restaurant } from '@/types/places';
 import { CACHE, GOOGLE_PLACES } from '@/config/constants';
 
 const GOOGLE_PLACES_API_KEY = process.env.GOOGLE_PLACES_API_KEY!;
 const CACHE_TTL = CACHE.TTL;
 
 // Initialize services
+console.log('REDIS_URL:', process.env.REDIS_URL);
 const redis = new Redis(process.env.REDIS_URL!);
 
 const cacheManager = new CacheManager(redis, CACHE_TTL);
@@ -25,9 +26,20 @@ export async function POST(request: NextRequest) {
     const ip = forwardedFor?.split(',')[0] ?? '127.0.0.1';
 
     const body: RequestBody = await request.json();
-    const { location, radius } = body;
+    const { location, radius, cuisines = [] } = body;
 
-    const searchParams: PlaceSearchParams = {
+    // If no cuisines selected, search all types
+    const searchCuisines = cuisines.length > 0 ? cuisines : [
+      'restaurant', 'cafe', 'bar', 'bakery', 'meal_takeaway', 'meal_delivery', 
+      'fast_food_restaurant', 'ice_cream_shop', 'pizza_restaurant', 
+      'sandwich_shop', 'coffee_shop', 'brunch_restaurant', 'american_restaurant',
+      'chinese_restaurant', 'italian_restaurant', 'japanese_restaurant', 
+      'korean_restaurant', 'indian_restaurant', 'thai_restaurant', 
+      'mexican_restaurant', 'french_restaurant', 'seafood_restaurant', 
+      'steak_house', 'sushi_restaurant', 'vegan_restaurant', 'vegetarian_restaurant'
+    ];
+
+    const baseSearchParams = {
       locationRestriction: {
         circle: {
           center: {
@@ -37,34 +49,49 @@ export async function POST(request: NextRequest) {
           radius: radius * 1000,
         },
       },
-      includedTypes: ['restaurant'],
       maxResultCount: GOOGLE_PLACES.MAX_RESULTS,
       languageCode: GOOGLE_PLACES.LANGUAGE,
     };
 
-    // Check caches first without rate limiting
-    const userSearches = await cacheManager.getUserSearches(ip);
-    const matchingSearch = userSearches.find(
-      (search: UserSearch) =>
-        isNearbyLocation(search.params.locationRestriction.circle.center, location) &&
-        search.params.locationRestriction.circle.radius ===
-          searchParams.locationRestriction.circle.radius,
-    );
+    // Try to get results from per-cuisine caches
+    const allCachedResults: Restaurant[] = [];
+    const cuisinesNeedingAPI: string[] = [];
 
-    // Return if found in user's recent searches
-    if (matchingSearch && Date.now() - matchingSearch.timestamp < CACHE_TTL * 1000) {
-      return NextResponse.json({
-        data: matchingSearch.results,
-        source: 'user_cache',
-      });
+    console.log(`🔍 Checking cache for ${searchCuisines.length} cuisines:`, searchCuisines);
+
+    for (const cuisine of searchCuisines) {
+      const cuisineSearchParams = {
+        ...baseSearchParams,
+        includedTypes: [cuisine],
+      };
+      
+      const cachedData = await cacheManager.getLocationCache(cuisineSearchParams);
+      
+      if (cachedData) {
+        console.log(`✅ Cache HIT for ${cuisine}: ${cachedData.length} results`);
+        allCachedResults.push(...cachedData);
+      } else {
+        console.log(`❌ Cache MISS for ${cuisine}`);
+        cuisinesNeedingAPI.push(cuisine);
+      }
     }
 
-    // Check location-based cache
-    const cachedData = await cacheManager.getLocationCache(searchParams);
-    if (cachedData) {
-      await cacheManager.addUserSearch(ip, searchParams, cachedData);
+    console.log(`📊 Cache summary: ${allCachedResults.length} cached results, ${cuisinesNeedingAPI.length} cuisines need API`);
+    if (cuisinesNeedingAPI.length > 0) {
+      console.log(`🔄 Will fetch from API:`, cuisinesNeedingAPI);
+    }
+
+    // If we have all cuisines cached, return combined results
+    if (cuisinesNeedingAPI.length === 0) {
+      // Remove duplicates and shuffle
+      const uniqueResults = Array.from(
+        new Map(allCachedResults.map(r => [r.id, r])).values()
+      );
+      
+      console.log(`✨ Returning ${uniqueResults.length} cached results (all from cache)`);
+      
       return NextResponse.json({
-        data: cachedData,
+        data: uniqueResults,
         source: 'location_cache',
       });
     }
@@ -92,18 +119,40 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Make Google API call only if no cache hits and within rate limit
-    const restaurants = await placesService.searchPlaces(searchParams);
+    // Fetch missing cuisines from Google API
+    const newResults: Restaurant[] = [];
+    
+    for (const cuisine of cuisinesNeedingAPI) {
+      console.log(`🌐 Fetching ${cuisine} from Google Places API...`);
+      
+      const cuisineSearchParams = {
+        ...baseSearchParams,
+        includedTypes: [cuisine],
+      };
+      
+      const restaurants = await placesService.searchPlaces(cuisineSearchParams);
+      console.log(`📥 Got ${restaurants.length} results for ${cuisine}`);
+      
+      newResults.push(...restaurants);
+      
+      // Cache results for this specific cuisine
+      await cacheManager.setLocationCache(cuisineSearchParams, restaurants);
+      console.log(`💾 Cached ${restaurants.length} results for ${cuisine}`);
+    }
 
-    // Cache the new results
-    await Promise.all([
-      cacheManager.setLocationCache(searchParams, restaurants),
-      cacheManager.addUserSearch(ip, searchParams, restaurants),
-    ]);
+    // Combine cached + new results
+    const allResults = [...allCachedResults, ...newResults];
+    
+    // Remove duplicates
+    const uniqueResults = Array.from(
+      new Map(allResults.map(r => [r.id, r])).values()
+    );
+
+    console.log(`🎯 Final result: ${uniqueResults.length} restaurants (${allCachedResults.length} cached + ${newResults.length} fresh)`);
 
     return NextResponse.json({
-      data: restaurants,
-      source: 'api',
+      data: uniqueResults,
+      source: cuisinesNeedingAPI.length === searchCuisines.length ? 'api' : 'mixed',
     });
   } catch (error) {
     console.error('Error fetching restaurants:', error);

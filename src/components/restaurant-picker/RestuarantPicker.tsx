@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Search, MapPin, RefreshCcw, AlertCircle } from 'lucide-react';
+import { Search, MapPin, RefreshCcw, AlertCircle, ExternalLink, ChevronDown, ChevronUp } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import Image from 'next/image';
 
 interface Restaurant {
   id: string;
@@ -12,6 +13,7 @@ interface Restaurant {
   rating: number;
   address: string;
   reviewCount: number;
+  photos?: string[];
 }
 
 interface Location {
@@ -27,10 +29,59 @@ interface APIResponse {
 const RestaurantPicker = () => {
   const [userLocation, setUserLocation] = useState<Location | null>(null);
   const [searchRadius, setSearchRadius] = useState<number>(2);
+  const cuisineOptions = [
+    { value: 'cafe', label: 'Cafes' },
+    { value: 'bar', label: 'Bars' },
+    { value: 'bakery', label: 'Bakeries' },
+    { value: 'meal_takeaway', label: 'Takeaway' },
+    { value: 'meal_delivery', label: 'Delivery' },
+    { value: 'fast_food_restaurant', label: 'Fast Food' },
+    { value: 'pizza_restaurant', label: 'Pizza' },
+    { value: 'coffee_shop', label: 'Coffee Shops' },
+    { value: 'ice_cream_shop', label: 'Ice Cream' },
+    { value: 'sandwich_shop', label: 'Sandwiches' },
+    { value: 'brunch_restaurant', label: 'Brunch' },
+    { value: 'american_restaurant', label: 'American' },
+    { value: 'chinese_restaurant', label: 'Chinese' },
+    { value: 'italian_restaurant', label: 'Italian' },
+    { value: 'japanese_restaurant', label: 'Japanese' },
+    { value: 'korean_restaurant', label: 'Korean' },
+    { value: 'indian_restaurant', label: 'Indian' },
+    { value: 'thai_restaurant', label: 'Thai' },
+    { value: 'mexican_restaurant', label: 'Mexican' },
+    { value: 'french_restaurant', label: 'French' },
+    { value: 'seafood_restaurant', label: 'Seafood' },
+    { value: 'steak_house', label: 'Steakhouse' },
+    { value: 'sushi_restaurant', label: 'Sushi' },
+    { value: 'vegan_restaurant', label: 'Vegan' },
+    { value: 'vegetarian_restaurant', label: 'Vegetarian' },
+  ];
+
+  const allCuisineValues = cuisineOptions.map(option => option.value);
+  const [selectedCuisines, setSelectedCuisines] = useState<string[]>(allCuisineValues);
+  const [isCuisineExpanded, setIsCuisineExpanded] = useState<boolean>(false);
   const [suggestion, setSuggestion] = useState<Restaurant | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [dataSource, setDataSource] = useState<string>('');
+
+  const isAllSelected = selectedCuisines.length === allCuisineValues.length;
+
+  const handleCuisineChange = (cuisineValue: string) => {
+    setSelectedCuisines(prev => 
+      prev.includes(cuisineValue)
+        ? prev.filter(c => c !== cuisineValue)
+        : [...prev, cuisineValue]
+    );
+  };
+
+  const handleAllChange = () => {
+    if (isAllSelected) {
+      setSelectedCuisines([]);
+    } else {
+      setSelectedCuisines(allCuisineValues);
+    }
+  };
 
   const getCurrentLocation = () => {
     if ('geolocation' in navigator) {
@@ -73,6 +124,7 @@ const RestaurantPicker = () => {
         body: JSON.stringify({
           location: userLocation,
           radius: searchRadius,
+          cuisines: selectedCuisines,
         }),
       });
 
@@ -97,7 +149,8 @@ const RestaurantPicker = () => {
 
       // Get random restaurant from results
       const randomIndex = Math.floor(Math.random() * data.length);
-      setSuggestion(data[randomIndex]);
+      const selectedRestaurant = data[randomIndex];
+      setSuggestion(selectedRestaurant);
       setDataSource(source);
     } catch (error) {
       setError(
@@ -163,6 +216,65 @@ const RestaurantPicker = () => {
               />
             </div>
 
+            {/* Cuisine Selection */}
+            <div>
+              <button
+                onClick={() => setIsCuisineExpanded(!isCuisineExpanded)}
+                className="flex items-center justify-between w-full text-sm font-medium mb-3 p-2 bg-gray-50 rounded hover:bg-gray-100 transition-colors"
+              >
+                <div className="flex-1 text-left">
+                  <div>Cuisine Types ({selectedCuisines.length} selected)</div>
+                  {!isCuisineExpanded && selectedCuisines.length > 0 && selectedCuisines.length < allCuisineValues.length && (
+                    <div className="text-xs text-gray-600 mt-1 truncate">
+                      {selectedCuisines
+                        .slice(0, 3)
+                        .map(cuisine => cuisineOptions.find(opt => opt.value === cuisine)?.label)
+                        .join(', ')}
+                      {selectedCuisines.length > 3 && ` +${selectedCuisines.length - 3} more`}
+                    </div>
+                  )}
+                  {!isCuisineExpanded && isAllSelected && (
+                    <div className="text-xs text-gray-600 mt-1">All types selected</div>
+                  )}
+                </div>
+                {isCuisineExpanded ? (
+                  <ChevronUp className="w-4 h-4 flex-shrink-0" />
+                ) : (
+                  <ChevronDown className="w-4 h-4 flex-shrink-0" />
+                )}
+              </button>
+              
+              {isCuisineExpanded && (
+                <div className="max-h-48 overflow-y-auto">
+                  {/* All checkbox */}
+                  <label className="flex items-center space-x-2 text-sm font-medium mb-2 p-2 bg-gray-50 rounded">
+                    <input
+                      type="checkbox"
+                      checked={isAllSelected}
+                      onChange={handleAllChange}
+                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span>All Types</span>
+                  </label>
+                  
+                  {/* Individual cuisine checkboxes */}
+                  <div className="grid grid-cols-2 gap-2">
+                    {cuisineOptions.map((cuisine) => (
+                      <label key={cuisine.value} className="flex items-center space-x-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={selectedCuisines.includes(cuisine.value)}
+                          onChange={() => handleCuisineChange(cuisine.value)}
+                          className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <span>{cuisine.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Suggestion Button */}
             <button
               onClick={getRandomRestaurant}
@@ -198,13 +310,46 @@ const RestaurantPicker = () => {
                     {suggestion.rating.toFixed(1)} ({suggestion.reviewCount} reviews)
                   </span>
                 </div>
+                {/* Restaurant Photos */}
+                {suggestion.photos && suggestion.photos.length > 0 && (
+                  <div className="mt-3">
+                    <div className="flex gap-2 overflow-x-auto">
+                      {suggestion.photos.map((photo: string, index: number) => (
+                        <Image
+                          key={index}
+                          src={photo}
+                          alt={`${suggestion.name} photo ${index + 1}`}
+                          width={80}
+                          height={80}
+                          className="w-20 h-20 object-cover rounded-lg flex-shrink-0"
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {/* Google Maps Link */}
+                <div className="mt-3">
+                  <a
+                    href={`https://www.google.com/maps/place/?q=place_id:${suggestion.id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 px-3 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                    View on Google Maps
+                  </a>
+                </div>
                 <p className="text-xs text-gray-500 mt-2">
                   Source:{' '}
                   {dataSource === 'api'
                     ? 'Live Search'
                     : dataSource === 'user_cache'
                       ? 'Recent Search'
-                      : 'Nearby Search'}
+                      : dataSource === 'location_cache'
+                        ? 'Cached Search'
+                        : dataSource === 'mixed'
+                          ? 'Mixed Cache + Live'
+                          : 'Nearby Search'}
                 </p>
               </div>
             )}
