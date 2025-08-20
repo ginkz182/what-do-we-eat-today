@@ -374,7 +374,7 @@ const RestaurantPicker = () => {
                 {/* Google Maps Link */}
                 <div className="mt-3">
                   <a
-                    href={`https://www.google.com/maps/place/?q=place_id:${suggestion.id}`}
+                    href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(suggestion.name)}&query_place_id=${suggestion.id}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-2 px-3 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors"
